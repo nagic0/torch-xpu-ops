@@ -3,6 +3,8 @@
 #include <ATen/native/UsmShare.h>
 #include <ATen/xpu/XPUContext.h>
 #include <c10/core/Allocator.h>
+#include <c10/core/Device.h>
+#include <c10/core/DeviceGuard.h>
 #include <c10/core/Storage.h>
 #include <c10/core/StorageImpl.h>
 #include <c10/util/Exception.h>
@@ -12,17 +14,30 @@
 namespace at::native::xpu {
 
 static c10::Storage storage_usm_share_xpu(const c10::Storage& src, const c10::Device& device) {
+  // Set device using DeviceGuard
+  c10::DeviceGuard device_guard(device);
+  
+  // Normalize device to actual device index (handle device.index() == -1 case)
+  c10::Device actual_device = device_guard.current_device();
+
   // Get source storage information
   void* src_ptr = src.mutable_data();
   size_t nbytes = src.nbytes();
 
-  auto sycl_device = ::at::xpu::getCurrentXPUStream(device.index()).queue().get_device();
-  auto sycl_context = ::at::xpu::getCurrentXPUStream(device.index()).queue().get_context();
+  // Get the actual SYCL device and context
+  sycl::device& sycl_device = c10::xpu::get_raw_device(actual_device.index());
+  auto sycl_context = ::at::xpu::getCurrentXPUStream(actual_device.index()).queue().get_context();
 
   // Ensure the context is a unified runtime context
   TORCH_CHECK(
       sycl_context.get_platform().get_backend() == sycl::backend::ext_oneapi_level_zero,
       "The backend is not Level Zero. USM Import requires Level Zero backend.");
+
+  // Check device USM support (integrated GPU with host unified memory)
+  TORCH_CHECK(
+      sycl_device.get_info<sycl::info::device::host_unified_memory>(),
+      "usm_share_xpu: target device does not support USM (not integrated GPU): ",
+      actual_device);
 
   try {
       sycl::ext::oneapi::experimental::prepare_for_device_copy(
@@ -44,7 +59,7 @@ static c10::Storage storage_usm_share_xpu(const c10::Storage& src, const c10::De
     sycl::context sycl_ctx;
   };
 
-  auto* deleter_context = new DeleterContext{src_impl, src_ptr, device, sycl_context};
+  auto* deleter_context = new DeleterContext{src_impl, src_ptr, actual_device, sycl_context};
 
   c10::DeleterFnPtr deleter = [](void* ctx) {
     auto* context = static_cast<DeleterContext*>(ctx);
@@ -60,7 +75,7 @@ static c10::Storage storage_usm_share_xpu(const c10::Storage& src, const c10::De
     delete context;
   };
 
-  auto data_ptr = c10::DataPtr(src_ptr, deleter_context, deleter, device);
+  auto data_ptr = c10::DataPtr(src_ptr, deleter_context, deleter, actual_device);
 
   auto new_storage_impl = c10::make_intrusive<c10::StorageImpl>(
       c10::StorageImpl::use_byte_size_t(),
