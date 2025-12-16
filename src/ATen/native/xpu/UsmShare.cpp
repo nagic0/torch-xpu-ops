@@ -1,6 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/Context.h>
-#include <ATen/native/Share.h>
+#include <ATen/native/UsmShare.h>
 #include <ATen/xpu/XPUContext.h>
 #include <c10/core/Allocator.h>
 #include <c10/core/Storage.h>
@@ -11,7 +11,7 @@
 
 namespace at::native::xpu {
 
-static c10::Storage storage_share_xpu(const c10::Storage& src, const c10::Device& device) {
+static c10::Storage storage_usm_share_xpu(const c10::Storage& src, const c10::Device& device) {
   // Get source storage information
   void* src_ptr = src.mutable_data();
   size_t nbytes = src.nbytes();
@@ -48,9 +48,7 @@ static c10::Storage storage_share_xpu(const c10::Storage& src, const c10::Device
 
   c10::DeleterFnPtr deleter = [](void* ctx) {
     auto* context = static_cast<DeleterContext*>(ctx);
-    // First, update the PyTorch metadata in src to reflect that sharing ended
-    context->src_impl->mutable_data_ptr().remove_usm_device(context->device);
-    // Then, release the imported USM memory
+    // Release the imported USM memory
     try {
         sycl::ext::oneapi::experimental::release_from_device_copy(
             context->data, context->sycl_ctx);
@@ -63,7 +61,6 @@ static c10::Storage storage_share_xpu(const c10::Storage& src, const c10::Device
   };
 
   auto data_ptr = c10::DataPtr(src_ptr, deleter_context, deleter, device);
-  data_ptr.enable_usm_support();
 
   auto new_storage_impl = c10::make_intrusive<c10::StorageImpl>(
       c10::StorageImpl::use_byte_size_t(),
@@ -72,14 +69,11 @@ static c10::Storage storage_share_xpu(const c10::Storage& src, const c10::Device
       c10::GetAllocator(c10::DeviceType::XPU),
       /* resizable */ false);
 
-  // Update src metadata to record that it's being shared with a new device
-  src.unsafeGetStorageImpl()->mutable_data_ptr().add_usm_device(device);
-
   return c10::Storage(std::move(new_storage_impl));
 }
 
 } // namespace at::native::xpu
 
 namespace at::native {
-REGISTER_XPU_DISPATCH(share_stub, &xpu::storage_share_xpu);
+REGISTER_XPU_DISPATCH(usm_share_stub, &xpu::storage_usm_share_xpu);
 } // namespace at::native
