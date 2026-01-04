@@ -9463,3 +9463,10 @@
   variants: function, method
 
 - func: inverse.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+# Native function for USM (Unified Shared Memory) sharing
+# 'self' is a dummy tensor on the target device (carries device info)
+# 'src' is the CPU storage containing the data to share
+- func: _usm_share_from(Tensor self, Storage src) -> Tensor
+  variants: function
+  dispatch:
+    XPU: usm_share_from_xpu

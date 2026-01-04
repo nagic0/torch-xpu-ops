@@ -38,6 +38,7 @@ list(APPEND CMAKE_MODULE_PATH ${TORCH_XPU_OPS_ROOT}/cmake/Modules)
 include(${TORCH_XPU_OPS_ROOT}/cmake/SYCL.cmake)
 include(${TORCH_XPU_OPS_ROOT}/cmake/ONEMKL.cmake)
 include(${TORCH_XPU_OPS_ROOT}/cmake/BuildFlags.cmake)
+include(${TORCH_XPU_OPS_ROOT}/cmake/LevelZero.cmake)
 
 set_build_flags()
 
